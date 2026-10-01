@@ -30,7 +30,6 @@ WELCOME_MESSAGE = (
 SUGGESTED_QUESTIONS = [
     "What services does Bonum offer?",
     "Tell me about Web Development.",
-    "What does Bonum do?",
     "How can I contact Bonum?",
     "Tell me about your Data Analytics services.",
 ]
