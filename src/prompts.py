@@ -31,6 +31,7 @@ SUGGESTED_QUESTIONS = [
     "What services does Bonum offer?",
     "Tell me about Web Development.",
     "How can I contact Bonum?",
+    "Tell me about Bonum refund policy."
     "Tell me about your Data Analytics services.",
 ]
 
