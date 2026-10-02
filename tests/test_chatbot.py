@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 
 from src import chunker, cleaner, config, prompts, scraper
-from src.chatbot import BonumChatbot, LLMError
+from src.chatbot import BonumChatbot, LLMError, _pick_mode
 from src.retriever import Hit, _expand_neighbors
 
 # --- Test doubles ------------------------------------------------------------
@@ -16,10 +16,11 @@ from src.retriever import Hit, _expand_neighbors
 
 class FakeRetriever:
     def __init__(self, hits=None, error=None):
-        self.hits, self.error, self.queries = hits or [], error, []
+        self.hits, self.error, self.queries, self.kwargs = hits or [], error, [], []
 
     def search(self, query, *args, **kwargs):
         self.queries.append(query)
+        self.kwargs.append(kwargs)
         if self.error:
             raise self.error
         return self.hits
@@ -36,8 +37,8 @@ class FakeLLM:
         return self.replies.pop(0)
 
 
-def _hit(url="https://bonum.in/webdev.php", name="Web Development", score=0.6):
-    chunk = {"id": 0, "url": url, "page_name": name, "section": name, "kind": "page", "text": f"{name}\nbody"}
+def _hit(url="https://bonum.in/webdev.php", name="Web Development", score=0.6, text=None):
+    chunk = {"id": 0, "url": url, "page_name": name, "section": name, "kind": "page", "text": text or f"{name}\nbody"}
     return Hit(chunk, score)
 
 
@@ -112,6 +113,34 @@ def test_neighbor_expansion_stays_on_same_page():
     chunks = [{"id": i, "url": "a" if i < 3 else "b", "kind": "page", "page_name": "p", "section": "s", "text": "t"} for i in range(5)]
     expanded = _expand_neighbors([Hit(chunks[2], 0.5)], chunks, limit=10)
     assert [h.chunk["id"] for h in expanded] == [2, 1]  # chunk 3 belongs to another page
+
+
+def test_repeated_question_gets_identical_answer_without_new_llm_call():
+    bot = _bot([_hit()], ["Bonum offers web development."])
+    first = bot.answer("Tell me about web development")
+    second = bot.answer("tell me about  web development!")
+    assert first.text == second.text and first.sources == second.sources
+    assert len(bot.llm.calls) == 1
+
+
+def test_detail_level_selection_and_retrieval_size():
+    assert _pick_mode("Explain web development in detail").name == "detailed"
+    assert _pick_mode("Briefly, what is Bonum?").name == "brief"
+    assert _pick_mode("What services do you offer?").name == "normal"
+    bot = _bot([_hit()], ["A long answer."])
+    bot.answer("Give me full details about web development")
+    assert bot.retriever.kwargs[-1]["top_k"] == 10
+
+
+def test_invented_phone_number_is_blocked():
+    result = _bot([_hit()], ["Call us on +91 98765 43210."]).answer("What is the phone number?")
+    assert result.status == "not_found" and "98765" not in result.text
+
+
+def test_phone_present_in_context_is_allowed():
+    hit = _hit(text="Contact\nCall +91 98765 43210")
+    result = _bot([hit], ["Call +91 98765 43210."]).answer("What is the phone number?")
+    assert result.status == "answered"
 
 
 # --- Ingestion pieces --------------------------------------------------------

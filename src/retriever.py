@@ -38,6 +38,7 @@ _INTENT_HINTS: list[tuple[re.Pattern, str, bool]] = [
 ]
 _INTENT_BOOST = 0.12
 _KEYWORD_BOOST = 0.05
+_LEXICAL_BOOST = 0.10
 _STOPWORDS = {
     "what", "does", "tell", "about", "with", "your", "have", "that", "this", "they", "from",
     "which", "offer", "provide", "bonum", "please", "would", "could", "there", "their", "much",
@@ -48,7 +49,7 @@ def _tokens(text: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 3 and t not in _STOPWORDS}
 
 
-def _boost(query: str, query_tokens: set[str], chunk: dict) -> float:
+def _boost(query: str, query_tokens: set[str], chunk: dict, text_tokens: frozenset | set = frozenset()) -> float:
     boost = 0.0
     for pattern, url_fragment, include_sitewide in _INTENT_HINTS:
         if not pattern.search(query):
@@ -56,7 +57,8 @@ def _boost(query: str, query_tokens: set[str], chunk: dict) -> float:
         if url_fragment in chunk["url"] or (include_sitewide and chunk.get("kind") == "sitewide"):
             boost = max(boost, _INTENT_BOOST)
     label_tokens = _tokens(f"{chunk['page_name']} {chunk['section']}")
-    return boost + min(2, len(query_tokens & label_tokens)) * _KEYWORD_BOOST
+    lexical = _LEXICAL_BOOST * len(query_tokens & text_tokens) / len(query_tokens) if query_tokens else 0.0
+    return boost + min(2, len(query_tokens & label_tokens)) * _KEYWORD_BOOST + lexical
 
 
 def _expand_neighbors(hits: list[Hit], chunks: list[dict], limit: int) -> list[Hit]:
@@ -103,6 +105,7 @@ class Retriever:
             raise VectorStoreError(
                 "The knowledge base is inconsistent. Re-run `python ingest.py` to rebuild it."
             )
+        self._text_tokens = [_tokens(chunk["text"]) for chunk in self._chunks]
 
     def search(
         self, query: str, top_k: int = config.TOP_K, threshold: float = config.RELEVANCE_THRESHOLD
@@ -114,7 +117,7 @@ class Retriever:
         scores, ids = self._index.search(embed_query(query), candidates)
         query_tokens = _tokens(query)
         hits = [
-            Hit(self._chunks[i], float(score) + _boost(query, query_tokens, self._chunks[i]))
+            Hit(self._chunks[i], float(score) + _boost(query, query_tokens, self._chunks[i], self._text_tokens[i]))
             for score, i in zip(scores[0], ids[0])
             if i >= 0
         ]
